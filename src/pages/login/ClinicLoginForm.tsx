@@ -1,33 +1,97 @@
+import { useState, type FormEvent } from 'react'
+import { AlertCircle, Loader2 } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useAuth } from '@/features/auth/useAuth'
+
+interface Props {
+  /** Where to go after signing in. */
+  next: string
+  /** Error to show on first render (e.g. a failed Google redirect). */
+  initialError: string | null
+}
 
 /**
- * Email/password + Google sign-in. Phase 1 renders the form only;
- * Phase 2 wires it to Supabase through useAuth().
+ * Email/password + Google sign-in. After a successful sign-in, LoginPage
+ * notices the new user and redirects, so this form doesn't navigate itself.
  */
-export function ClinicLoginForm() {
+export function ClinicLoginForm({ next, initialError }: Props) {
+  const { signInWithPassword, signInWithGoogle, isConfigured, isBypass } = useAuth()
+  const [pending, setPending] = useState<'password' | 'google' | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
+
+  const run = async (kind: 'password' | 'google', action: () => Promise<void>) => {
+    setPending(kind)
+    setError(null)
+    try {
+      await action()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-in failed. Please try again.')
+    } finally {
+      // On success with Google the page is already navigating away, which is fine.
+      setPending(null)
+    }
+  }
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = new FormData(e.currentTarget)
+    void run('password', () =>
+      signInWithPassword(String(form.get('email')), String(form.get('password'))),
+    )
+  }
+
+  const disabled = !isConfigured || isBypass || pending !== null
+
   return (
-    <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
-      <fieldset disabled className="space-y-3">
+    <form className="space-y-3" onSubmit={handleSubmit}>
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle aria-hidden />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <fieldset disabled={disabled} className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" autoComplete="email" required />
+          <Input id="email" name="email" type="email" autoComplete="email" required />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="password">Password</Label>
-          <Input id="password" type="password" autoComplete="current-password" required />
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
         </div>
         <Button type="submit" className="w-full">
+          {pending === 'password' && <Loader2 className="animate-spin" aria-hidden />}
           Sign in
         </Button>
-        <Button type="button" variant="outline" className="w-full">
-          <GoogleIcon /> Continue with Google
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={() => void run('google', () => signInWithGoogle(next))}
+        >
+          {pending === 'google' ? <Loader2 className="animate-spin" aria-hidden /> : <GoogleIcon />}
+          Continue with Google
         </Button>
       </fieldset>
-      <p className="text-center text-xs text-muted-foreground">
-        Sign-in isn't connected yet (Supabase is added in Phase 2).
-      </p>
+      {!isConfigured && (
+        <p className="text-center text-xs text-muted-foreground">
+          Sign-in is unavailable: Supabase isn't configured (see README).
+        </p>
+      )}
+      {isBypass && (
+        <p className="text-center text-xs text-muted-foreground">
+          Sign-in is disabled while the dev auth bypass is on.
+        </p>
+      )}
     </form>
   )
 }

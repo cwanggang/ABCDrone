@@ -1,14 +1,25 @@
-import { Link } from 'react-router'
+import { Link, Navigate, useSearchParams } from 'react-router'
 import { Stethoscope, UserRound } from 'lucide-react'
+import { FullPageLoading } from '@/components/FullPageLoading'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { safeNextPath } from '@/features/auth/safeNextPath'
 import { useAuth } from '@/features/auth/useAuth'
 import { ClinicLoginForm } from './ClinicLoginForm'
 
 /** Portal page: clinic staff sign in here; patients will get their own option later. */
 export function LoginPage() {
-  const { isBypass } = useAuth()
+  const { user, isLoading, isBypass } = useAuth()
+  const [params] = useSearchParams()
+  const next = safeNextPath(params.get('next'))
+  // Supabase puts OAuth failures (e.g. cancelling Google sign-in) in the URL.
+  const oauthError = params.get('error_description')
+
+  if (isLoading) return <FullPageLoading />
+  // Already signed in (including right after returning from Google): go on into the app.
+  // Skipped in bypass mode, where you're always "signed in" and still need to see this page.
+  if (user && !isBypass) return <Navigate to={next} replace />
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
@@ -22,7 +33,7 @@ export function LoginPage() {
         {isBypass && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-900">
             Dev auth bypass is on (VITE_AUTH_BYPASS=true).{' '}
-            <Link to="/dashboard" className="font-medium underline">
+            <Link to={next} className="font-medium underline">
               Continue to the dashboard
             </Link>
           </div>
@@ -37,7 +48,7 @@ export function LoginPage() {
               <CardDescription>Monitor drones and sample temperatures.</CardDescription>
             </CardHeader>
             <CardContent>
-              <ClinicLoginForm />
+              <ClinicLoginForm next={next} initialError={oauthError} />
             </CardContent>
           </Card>
 
