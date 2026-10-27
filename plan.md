@@ -4,7 +4,7 @@ This file tracks the flow of the project: what each phase covers, what is done,
 and what is still to do. **Keep it up to date as work happens.** Tick items off
 when they are finished, and add new items or decisions as they come up.
 
-_Last updated: 2026-10-21 (Phase 2 complete, including Supabase setup; Vercel deployment prepared, checklist below)_
+_Last updated: 2026-10-27 (Vercel deployment done; Phase 3 ThingSpeak provider implemented on the `thingspeak` branch, user steps listed under Phase 3)_
 
 ## Goal
 
@@ -69,34 +69,43 @@ app is designed for it but does not build it.
 - [x] **User:** set up the Google OAuth client and enable the Google provider in Supabase
 - [x] **User:** create an account, grant it `role = 'clinic'`, set `VITE_AUTH_BYPASS=false`, and test signing in for real
 
-## Deployment: Vercel ⏳ In progress
+## Deployment: Vercel ✅ Complete
 
 The app is a static SPA (`npm run build` → `dist/`). The deployed site uses mock
-telemetry until Phase 3, and always requires a real Supabase sign-in (the auth
+telemetry until the ThingSpeak read keys move server-side, and always requires a real Supabase sign-in (the auth
 bypass only works in `npm run dev`). Full steps are in the README under
 "Deploying to Vercel".
 
 - [x] `vercel.json` rewrites every path to `index.html`, so deep links, page refreshes and the Google sign-in return to `/login?next=…` don't 404
-- [ ] **User:** commit and push (including `vercel.json`)
-- [ ] **User:** create the Vercel project from the repo (Framework preset: Vite; build `npm run build`; output `dist`)
-- [ ] **User:** add env vars in Vercel **before the first build**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TELEMETRY_SOURCE=mock`. Never the service_role key. Values are baked in at build time, so redeploy after changing any of them
-- [ ] **User:** in Supabase → Authentication → URL Configuration, set the Site URL to the production URL and add `https://<production-domain>/**` to Redirect URLs (keep `http://localhost:5173/**`)
+- [x] **User:** commit and push (including `vercel.json`)
+- [x] **User:** create the Vercel project from the repo (Framework preset: Vite; build `npm run build`; output `dist`)
+- [x] **User:** add env vars in Vercel **before the first build**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TELEMETRY_SOURCE=mock`. Never the service_role key. Values are baked in at build time, so redeploy after changing any of them
+- [x] **User:** in Supabase → Authentication → URL Configuration, set the Site URL to the production URL and add `https://<production-domain>/**` to Redirect URLs (keep `http://localhost:5173/**`)
 - [ ] **User (optional):** add `https://*-<vercel-team>.vercel.app/**` to Redirect URLs so sign-in works on preview deploys
-- [ ] **User:** if the Google OAuth consent screen is in "Testing" mode, add clinic testers as test users (or publish the app)
-- [ ] **User:** smoke-test production: refresh on `/drones/<id>` (no 404), password sign-in, Google sign-in, a patient account sees "No access", sign-out
+- [x] **User:** if the Google OAuth consent screen is in "Testing" mode, add clinic testers as test users (or publish the app)
+- [x] **User:** smoke-test production: refresh on `/drones/<id>` (no 404), password sign-in, Google sign-in, a patient account sees "No access", sign-out
 - [ ] Optional: long-lived cache headers for `/assets/*` and basic security headers in `vercel.json`
-- [ ] **Before deploying with real ThingSpeak data (Phase 3):** move the read keys into a Supabase Edge Function. `VITE_` vars are public, and GPS history reveals patients' home locations
+- [ ] **Before switching the deployed site to `thingspeak`:** move the read keys into a Supabase Edge Function. `VITE_` vars are public, and GPS history reveals patients' home locations
 
-## Phase 3: ThingSpeak provider ⏳ Not started
+## Phase 3: ThingSpeak provider ⏳ Code done, waiting on user steps
 
-- [ ] `src/config/thingspeakFields.ts`: field1 temp °C, field2 lat, field3 lng, field4 speed m/s, field5 battery %, clearly marked as the hardware contract
-- [ ] Zod schema for ThingSpeak feed responses (string fields → numbers, null/missing fields allowed)
-- [ ] `ThingSpeakTelemetryProvider`: `getLatest` (`/feeds/last.json`), `getHistory` (`/feeds.json?minutes=`), with per-channel read keys from `VITE_THINGSPEAK_READ_KEYS`
-- [ ] Drone list: Supabase `drones` table → fall back to `src/config/drones.ts` with `fallbackReason` (the banner already exists)
-- [ ] `createTelemetryProvider` switch on `VITE_TELEMETRY_SOURCE`
-- [ ] Tests: Zod parsing of a sample ThingSpeak response (incl. missing/garbage fields)
-- [ ] README: pointing at a real channel, and moving the read keys to an Edge Function
-- [ ] Verify `dev` / `build` / `lint` / `test` pass
+Work is on the `thingspeak` branch.
+
+- [x] `src/config/thingspeakFields.ts`: field1 temp °C, field2 lat, field3 lng, field4 speed m/s, field5 battery %, clearly marked as the hardware contract
+- [x] Zod schema for ThingSpeak feed responses (`thingspeak/thingspeakSchema.ts`): string fields → numbers, missing/garbage → null, `0,0` → no GPS fix, entries without a valid timestamp skipped, `-1` body → "channel not found or bad read key" error
+- [x] `ThingSpeakTelemetryProvider`: `getLatest` (`/feeds.json?results=1`), `getHistory` (`/feeds.json?minutes=`), per-channel read keys from `VITE_THINGSPEAK_READ_KEYS` (Zod-validated JSON map in `env.ts`), 10 s request timeout, readable errors
+  - Decision: use `/feeds.json?results=1` instead of `/feeds/last.json`, because `last.json` answers `-1` for both an empty channel and a wrong key
+- [x] Drone list (`thingspeak/loadDroneList.ts`): Supabase `drones` table → fall back to `src/config/drones.ts` with `fallbackReason`. Also falls back when there is no Supabase session (dev bypass), because RLS would silently return zero rows
+- [x] `createTelemetryProvider` switch on `VITE_TELEMETRY_SOURCE`
+- [x] Tests: Zod parsing of a sample ThingSpeak response (incl. missing/garbage fields), the provider with a fake `fetch`, the drone-list fallback (50 tests total)
+- [x] README: pointing at a real channel, troubleshooting, and the plan for moving the read keys to an Edge Function
+- [x] `.env.example`: `VITE_THINGSPEAK_READ_KEYS` with a "local only" warning
+- [x] Verified `build` / `lint` / `test` pass and `dev` starts
+- [ ] **User:** fill in the real channel ids in `src/config/drones.ts` (fallback list; currently one placeholder drone with no channel)
+- [ ] **User:** insert one `public.drones` row per drone in the Supabase SQL Editor (see README)
+- [ ] **User:** in `.env.local`, set `VITE_TELEMETRY_SOURCE=thingspeak`, `VITE_AUTH_BYPASS=false` and `VITE_THINGSPEAK_READ_KEYS` (private channels only), restart `npm run dev`, sign in as clinic
+- [ ] **User:** check with live hardware data: positions on the map, temperature chart, status changes, stale/offline when the carrier stops uploading
+- [ ] **User:** keep Vercel on `VITE_TELEMETRY_SOURCE=mock` and do not add `VITE_THINGSPEAK_READ_KEYS` there (see Deployment)
 
 ## Later / out of scope for now
 

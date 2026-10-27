@@ -1,5 +1,8 @@
+import { STATIC_DRONES } from '@/config/drones'
 import { env } from '@/config/env'
+import { supabase } from '@/lib/supabase'
 import { MockTelemetryProvider } from './mock/MockTelemetryProvider'
+import { ThingSpeakTelemetryProvider } from './thingspeak/ThingSpeakTelemetryProvider'
 import type { TelemetryProvider } from './TelemetryProvider'
 
 /** Picks the implementation based on VITE_TELEMETRY_SOURCE. */
@@ -8,7 +11,10 @@ export function createTelemetryProvider(): TelemetryProvider {
     case 'mock':
       return new MockTelemetryProvider()
     case 'thingspeak':
-      // Added in Phase 3.
-      throw new Error('VITE_TELEMETRY_SOURCE=thingspeak is not implemented yet. Use "mock".')
+      return new ThingSpeakTelemetryProvider({
+        supabase,
+        fallbackDrones: STATIC_DRONES,
+        readKeys: env.thingspeakReadKeys,
+      })
   }
 }

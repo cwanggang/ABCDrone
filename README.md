@@ -6,9 +6,10 @@ the clinic. Each carrier (ESP32 + temperature sensor + SIM7080G GNSS/cellular)
 uploads temperature and GPS to ThingSpeak. This app lets clinic staff watch the
 drones live.
 
-> **Status:** Phases 1–2 done (mock data, UI, Supabase auth with roles, connected
-> to a live Supabase project). Deployment to Vercel is being set up. The real
-> ThingSpeak connection arrives in Phase 3. See [`plan.md`](plan.md) for progress.
+> **Status:** Phases 1–2 done (mock data, UI, Supabase auth with roles) and
+> deployed to Vercel (with mock data). Phase 3 adds the real ThingSpeak
+> connection, for local use until the read keys move server-side. See
+> [`plan.md`](plan.md) for progress.
 
 ## Quick start (mock mode)
 
@@ -48,12 +49,13 @@ Every drone's temperature drifts out of the safe range for about a minute every
 All variables are listed and explained in [`.env.example`](.env.example). Put your
 values in `.env.local`, which git ignores.
 
-| Variable                 | Values                 | Purpose                                                                    |
-| ------------------------ | ---------------------- | -------------------------------------------------------------------------- |
-| `VITE_TELEMETRY_SOURCE`  | `mock` \| `thingspeak` | Where drone data comes from (default `mock`)                               |
-| `VITE_AUTH_BYPASS`       | `true` \| `false`      | Skip login as a fake clinic user. **Dev only**: ignored by `npm run build` |
-| `VITE_SUPABASE_URL`      | URL                    | Your Supabase project URL                                                  |
-| `VITE_SUPABASE_ANON_KEY` | string                 | Your Supabase anon (public) key. **Never** the service_role key            |
+| Variable                    | Values                 | Purpose                                                                                        |
+| --------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------- |
+| `VITE_TELEMETRY_SOURCE`     | `mock` \| `thingspeak` | Where drone data comes from (default `mock`)                                                   |
+| `VITE_AUTH_BYPASS`          | `true` \| `false`      | Skip login as a fake clinic user. **Dev only**: ignored by `npm run build`                     |
+| `VITE_SUPABASE_URL`         | URL                    | Your Supabase project URL                                                                      |
+| `VITE_SUPABASE_ANON_KEY`    | string                 | Your Supabase anon (public) key. **Never** the service_role key                                |
+| `VITE_THINGSPEAK_READ_KEYS` | JSON object            | Read keys for private channels, `{"<channel id>":"<key>"}`. **Local only** (see Security note) |
 
 ## Connecting Supabase (login + roles)
 
@@ -168,7 +170,7 @@ including the mock data, follows.
 ## ThingSpeak field mapping
 
 This is a contract with the hardware team: the firmware must write these fields.
-It lives in `src/config/thingspeakFields.ts` (added in Phase 3).
+It lives in `src/config/thingspeakFields.ts`. Fields 6–8 are free for future sensors.
 
 | ThingSpeak field | Meaning            | Unit            |
 | ---------------- | ------------------ | --------------- |
@@ -181,7 +183,65 @@ It lives in `src/config/thingspeakFields.ts` (added in Phase 3).
 ThingSpeak's free tier allows one update every 15 s per channel and at most 4
 channels, so plan on one channel per drone and at most four drones.
 
+## Pointing at a real ThingSpeak channel
+
+1. **Find the channel id and read key.** In ThingSpeak, open the drone's channel.
+   The id is on the channel page; the read key is under _API Keys_ → _Read API Keys_.
+   (Public channels need no key.)
+2. **Register the drone in Supabase** (SQL Editor), one row per drone:
+   ```sql
+   insert into public.drones (id, name, thingspeak_channel_id)
+   values ('blue-devil-1', 'Blue Devil 1', '1234567');
+   ```
+   `id` is the URL slug (lowercase letters, digits and dashes). Home base defaults
+   to Duke University Hospital.
+3. **Point the app at ThingSpeak** in `.env.local`, then restart `npm run dev`:
+   ```bash
+   VITE_TELEMETRY_SOURCE=thingspeak
+   VITE_AUTH_BYPASS=false          # the drone list needs a real Supabase sign-in
+   VITE_THINGSPEAK_READ_KEYS={"1234567":"ABCDEFGHIJKLMNOP"}
+   ```
+4. **Sign in as a clinic user.** The top bar shows a "ThingSpeak" badge instead of
+   "Mock data".
+
+**How it reads data** (`src/features/telemetry/thingspeak/`):
+
+- `getLatest` calls `/channels/<id>/feeds.json?results=1` and `getHistory` calls
+  `/channels/<id>/feeds.json?minutes=30`. We don't use `/feeds/last.json` because
+  it answers `-1` both for an empty channel and for a wrong read key.
+- Every field is parsed with Zod (`thingspeakSchema.ts`). A field that is missing or
+  isn't a number becomes "no reading" rather than an error, a `0,0` position counts
+  as "no GPS fix", and an entry without a valid timestamp is skipped.
+- **Drone list:** read from the Supabase `drones` table. If that fails (Supabase not
+  configured, a network error, or no session because the dev bypass is on), the
+  app uses the built-in list in `src/config/drones.ts` and shows an amber banner
+  saying why. Keep that file in sync with the table.
+
+**Troubleshooting.** "wasn't found, or it is private and its read key is missing
+or wrong": check the channel id in Supabase and the key in
+`VITE_THINGSPEAK_READ_KEYS`. A drone that shows offline with no data has a
+channel with no entries yet. Restart `npm run dev` after editing `.env.local`.
+
+### Moving the read keys to an Edge Function (before real deployment)
+
+Don't set `VITE_THINGSPEAK_READ_KEYS` in Vercel: anyone who loads the site could
+pull the keys out of the JavaScript and read every drone's GPS history (see
+Security note). Until the keys move server-side, keep the deployed site on
+`VITE_TELEMETRY_SOURCE=mock`. The plan for the move:
+
+1. A Supabase Edge Function (e.g. `thingspeak-feed`) that takes a drone id and
+   `results` or `minutes`, checks the caller's JWT belongs to a clinic user
+   (`is_clinic()`), looks up the drone's channel, and calls ThingSpeak with a read
+   key stored as a function secret (`supabase secrets set ...`).
+2. Change only `ThingSpeakTelemetryProvider.readFeed` to call
+   `supabase.functions.invoke('thingspeak-feed', ...)` instead of ThingSpeak.
+   Parsing, hooks and UI stay the same.
+3. Delete `VITE_THINGSPEAK_READ_KEYS` and rotate the read keys (any that were in a
+   bundle should be treated as leaked).
+
 ## Coming in later phases
 
-- **Phase 3:** `ThingSpeakTelemetryProvider`, the field-mapping config, and
-  instructions for pointing at a real channel.
+- Move ThingSpeak reads (and keys) into a Supabase Edge Function, then switch the
+  deployed site to `thingspeak`.
+- Duke SSO, patient-facing side, Missions / Patients / Settings pages. See
+  [`plan.md`](plan.md).
