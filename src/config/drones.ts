@@ -11,11 +11,10 @@ import type { Drone } from '@/types/drone'
  * that doesn't have one yet; it will show an error instead of data.
  */
 export const STATIC_DRONES: Drone[] = [
-  // TODO(hardware): fill in real ThingSpeak channel ids.
   {
     id: 'blue-devil-1',
     name: 'Blue Devil 1',
-    thingspeakChannelId: null,
+    thingspeakChannelId: '3553843',
     homeBase: CLINIC_HOME_BASE,
   },
 ]
